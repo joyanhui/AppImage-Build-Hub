@@ -1,0 +1,43 @@
+name: Build vscode AppImage
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '5 */14 * * *'
+  # push:
+  #   branches:
+  #     - "main"
+
+jobs:
+  version:
+    name: VSCode AppImage
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+      - uses: actions/checkout@v2
+      - name: Build
+        id: build
+        uses: valicm/appimage-bash@main
+        with:
+          version_url: 'https://code.visualstudio.com/sha/download?build=stable\&os=linux-x64'
+          version_file: 'resources/app/package.json'
+          version_bash: 'jq -r  .version'
+          version_icon: 'code.png'
+      - name: Upload artifact
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_SHORT_NAME }}.AppImage
+          path: 'dist'
+      - name: Release
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          title: ${{ env.APP_NAME }} AppImage ${{ env.APP_VERSION }}
+          automatic_release_tag: latest
+          prerelease: false
+          files: |
+            dist/
+          repo_token: ${{ secrets.GITHUB_TOKEN }}

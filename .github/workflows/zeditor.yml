@@ -1,0 +1,70 @@
+name: Build Release AppImage
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '5 */14 * * *'
+  push:
+    branches:
+      - 'main'
+
+jobs:
+  version:
+    name: Zed Release AppImage
+    runs-on: ubuntu-24.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up directories and version file
+        id: get_zed_version
+        run: |
+          mkdir -p AppDir/usr/bin
+          # Fetch all releases and find the latest pre-release (unchanged)
+          ALL_RELEASES=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/zed-industries/zed/releases)
+          VERSION_TAG=$(echo "$ALL_RELEASES" | jq -r 'map(select(.prerelease)) | first | .tag_name')
+
+          if [ -z "$VERSION_TAG" ]; then
+            echo "Error: No pre-release found."
+            exit 1
+          fi
+
+          VERSION=$(echo "$VERSION_TAG" | sed 's/^v//')
+          echo "{\"version\": \"$VERSION\"}" > AppDir/usr/bin/version.json
+          echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+      - name: Install FUSE
+        run: |
+          sudo add-apt-repository universe
+          sudo apt-get update
+          sudo apt-get install -y libfuse2t64
+      - name: Build
+        id: build
+        uses: lavilao/appimage-bash@main
+        with:
+          version_url: 'https://github.com/zed-industries/zed/releases/download/${{ steps.get_zed_version.outputs.VERSION_TAG }}/zed-linux-x86_64.tar.gz'
+          version_file: 'version.json'
+          version_icon: 'zed.png'
+      - name: Verify artifacts
+        run: |
+          ls -lh dist/
+          [ -f dist/*.AppImage ] || exit 1
+          [ -f dist/*.zsync ] || exit 1
+      - name: Upload artifact
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zed-AppImage-artifacts
+          path: |
+            dist/*.AppImage
+            dist/*.zsync
+      - name: Release
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          title: ${{ env.APP_NAME }} AppImage ${{ env.APP_VERSION }} # Removed "(Pre-release)"
+          automatic_release_tag: latest # Changed from 'latest-pre'
+          prerelease: false # Changed from true to false
+          files: |
+            dist/*.AppImage
+            dist/*.zsync
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
