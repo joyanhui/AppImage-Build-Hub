@@ -2,7 +2,7 @@ name: Build AppImages (VSCode & Zed)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 */2 * *'  # 每两天的凌晨2点运行
+    - cron: '0 2 */2 * *' # 每两天的凌晨2点运行
 
 jobs:
   vscode:
@@ -22,6 +22,15 @@ jobs:
           version_file: 'resources/app/package.json'
           version_bash: 'jq -r  .version'
           version_icon: 'code.png'
+      - name: Get VSCode version for release
+        id: vscode_version
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        run: |
+          if [ -n "${{ env.APP_VERSION }}" ]; then
+            echo "version=${{ env.APP_VERSION }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=latest" >> $GITHUB_OUTPUT
+          fi
       - name: Upload VSCode artifact
         if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
         uses: actions/upload-artifact@v4
@@ -32,7 +41,7 @@ jobs:
         if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
         uses: marvinpinto/action-automatic-releases@latest
         with:
-          title: ${{ env.APP_NAME }} AppImage ${{ env.APP_VERSION }}
+          title: VSCode AppImage ${{ steps.vscode_version.outputs.version }}
           automatic_release_tag: vscode-latest
           prerelease: false
           files: |
@@ -88,11 +97,22 @@ jobs:
           path: |
             dist/*.AppImage
             dist/*.zsync
+      - name: Get Zed version for release
+        id: zed_version
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        run: |
+          if [ -n "${{ env.APP_VERSION }}" ]; then
+            echo "version=${{ env.APP_VERSION }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ steps.get_zed_version.outputs.VERSION }}" ]; then
+            echo "version=${{ steps.get_zed_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=latest" >> $GITHUB_OUTPUT
+          fi
       - name: Release Zed
         if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
         uses: marvinpinto/action-automatic-releases@latest
         with:
-          title: ${{ env.APP_NAME }} AppImage ${{ env.APP_VERSION }}
+          title: ZedEditor AppImage ${{ steps.zed_version.outputs.version }}
           automatic_release_tag: zed-latest
           prerelease: false
           files: |
