@@ -14,6 +14,12 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y imagemagick
       - uses: actions/checkout@v2
+      - name: Setup VSCode desktop file
+        run: |
+          # 确保使用正确的desktop文件
+          if [ -f "vscode-app.desktop" ]; then
+            cp vscode-app.desktop app.desktop
+          fi
       - name: Build VSCode
         id: build
         uses: valicm/appimage-bash@main
@@ -22,6 +28,19 @@ jobs:
           version_file: 'resources/app/package.json'
           version_bash: 'jq -r  .version'
           version_icon: 'code.png'
+      - name: Rename VSCode AppImage
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        run: |
+          # 重命名生成的AppImage文件
+          if [ -d dist ]; then
+            cd dist
+            for file in *.AppImage; do
+              if [[ "$file" != VSCode-* ]]; then
+                mv "$file" "VSCode-x86_64.AppImage"
+              fi
+            done
+            cd ..
+          fi
       - name: Get VSCode version for release
         id: vscode_version
         if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
@@ -31,6 +50,7 @@ jobs:
           else
             echo "version=latest" >> $GITHUB_OUTPUT
           fi
+
       - name: Upload VSCode artifact
         if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
         uses: actions/upload-artifact@v4
@@ -55,6 +75,12 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v2
+      - name: Setup Zed desktop file
+        run: |
+          # 确保使用正确的desktop文件
+          if [ -f "zed-app.desktop" ]; then
+            cp zed-app.desktop app.desktop
+          fi
       - name: Set up directories and version file
         id: get_zed_version
         run: |
@@ -84,11 +110,25 @@ jobs:
           version_url: 'https://github.com/zed-industries/zed/releases/download/${{ steps.get_zed_version.outputs.VERSION_TAG }}/zed-linux-x86_64.tar.gz'
           version_file: 'version.json'
           version_icon: 'zed.png'
-      - name: Verify artifacts
+      - name: Rename Zed AppImage and verify artifacts
         run: |
           ls -lh dist/
           [ -f dist/*.AppImage ] || exit 1
           [ -f dist/*.zsync ] || exit 1
+          # 重命名生成的AppImage文件
+          cd dist
+          for file in *.AppImage; do
+            if [[ "$file" != zed-* ]]; then
+              mv "$file" "zed-x86_64.AppImage"
+            fi
+          done
+          # 同样处理zsync文件
+          for file in *.zsync; do
+            if [[ "$file" != zed-* ]]; then
+              mv "$file" "zed-x86_64.AppImage.zsync"
+            fi
+          done
+          cd ..
       - name: Upload Zed artifact
         if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
         uses: actions/upload-artifact@v4
