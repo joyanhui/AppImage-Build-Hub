@@ -1,11 +1,11 @@
-name: Build Release AppImage
+name: Build zeditor AppImage
 on:
   workflow_dispatch:
   schedule:
     - cron: '5 */14 * * *'
-  push:
-    branches:
-      - 'main'
+  # push:
+  #   branches:
+  #     - "main"
 
 jobs:
   version:
