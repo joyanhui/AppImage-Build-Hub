@@ -1,0 +1,202 @@
+name: Build AppImages (VSCode & Zed)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 */2 * *' # 每两天的凌晨2点运行
+
+jobs:
+  vscode:
+    name: VSCode AppImage
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+      - uses: actions/checkout@v2
+      - name: Setup VSCode desktop file
+        run: |
+          # 确保使用正确的desktop文件
+          if [ -f "vscode-app.desktop" ]; then
+            cp vscode-app.desktop app.desktop
+          fi
+      - name: Build VSCode
+        id: build
+        uses: valicm/appimage-bash@main
+        with:
+          version_url: 'https://code.visualstudio.com/sha/download?build=stable\&os=linux-x64'
+          version_file: 'resources/app/package.json'
+          version_bash: 'jq -r  .version'
+          version_icon: 'code.png'
+      - name: Rename VSCode AppImage
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        run: |
+          # 重命名生成的AppImage文件
+          if [ -d dist ]; then
+            cd dist
+            for file in *.AppImage; do
+              if [[ "$file" != VSCode-* ]]; then
+                mv "$file" "VSCode-x86_64.AppImage"
+              fi
+            done
+            cd ..
+          fi
+      - name: Get VSCode version for release
+        id: vscode_version
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        run: |
+          if [ -n "${{ env.APP_VERSION }}" ]; then
+            echo "version=${{ env.APP_VERSION }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload VSCode artifact
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: VSCode-AppImage
+          path: 'dist'
+      - name: Release VSCode
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          title: VSCode AppImage ${{ steps.vscode_version.outputs.version }}
+          automatic_release_tag: vscode-latest
+          prerelease: false
+          files: |
+            dist/
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+
+  zed:
+    name: Zed Editor AppImage
+    runs-on: ubuntu-24.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Zed desktop file
+        run: |
+          # 确保使用正确的desktop文件
+          if [ -f "zed-app.desktop" ]; then
+            cp zed-app.desktop app.desktop
+          fi
+      - name: Set up directories and version file
+        id: get_zed_version
+        run: |
+          mkdir -p AppDir/usr/bin
+          # Fetch all releases and find the latest pre-release
+          ALL_RELEASES=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/zed-industries/zed/releases)
+          VERSION_TAG=$(echo "$ALL_RELEASES" | jq -r 'map(select(.prerelease)) | first | .tag_name')
+
+          if [ -z "$VERSION_TAG" ]; then
+            echo "Error: No pre-release found."
+            exit 1
+          fi
+
+          VERSION=$(echo "$VERSION_TAG" | sed 's/^v//')
+          echo "{\"version\": \"$VERSION\"}" > AppDir/usr/bin/version.json
+          echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+      - name: Install FUSE
+        run: |
+          sudo add-apt-repository universe
+          sudo apt-get update
+          sudo apt-get install -y libfuse2t64
+      - name: Build Zed
+        id: build
+        uses: lavilao/appimage-bash@main
+        with:
+          version_url: 'https://github.com/zed-industries/zed/releases/download/${{ steps.get_zed_version.outputs.VERSION_TAG }}/zed-linux-x86_64.tar.gz'
+          version_file: 'version.json'
+          version_icon: 'zed.png'
+      - name: Rename Zed AppImage and verify artifacts
+        run: |
+          ls -lh dist/
+          [ -f dist/*.AppImage ] || exit 1
+          [ -f dist/*.zsync ] || exit 1
+          # 重命名生成的AppImage文件
+          cd dist
+          for file in *.AppImage; do
+            if [[ "$file" != zed-* ]]; then
+              mv "$file" "zed-x86_64.AppImage"
+            fi
+          done
+          # 同样处理zsync文件
+          for file in *.zsync; do
+            if [[ "$file" != zed-* ]]; then
+              mv "$file" "zed-x86_64.AppImage.zsync"
+            fi
+          done
+          cd ..
+      - name: Upload Zed artifact
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zed-AppImage
+          path: |
+            dist/*.AppImage
+            dist/*.zsync
+      - name: Get Zed version for release
+        id: zed_version
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        run: |
+          if [ -n "${{ env.APP_VERSION }}" ]; then
+            echo "version=${{ env.APP_VERSION }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ steps.get_zed_version.outputs.VERSION }}" ]; then
+            echo "version=${{ steps.get_zed_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=latest" >> $GITHUB_OUTPUT
+          fi
+      - name: Release Zed
+        if: ${{ env.APP_UPDATE_NEEDED == 'true' }}
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          title: ZedEditor AppImage ${{ steps.zed_version.outputs.version }}
+          automatic_release_tag: zed-latest
+          prerelease: false
+          files: |
+            dist/*.AppImage
+            dist/*.zsync
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+
+  cleanup-releases:
+    name: Cleanup Old Releases
+    runs-on: ubuntu-latest
+    needs: [vscode, zed]
+    if: always()
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Clean up old releases
+        run: |
+          # 获取所有releases
+          RELEASES=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases")
+
+          # 获取VSCode releases (保留最新10个)
+          VSCODE_RELEASES=$(echo "$RELEASES" | jq -r '.[] | select(.tag_name | startswith("vscode-")) | .id' | head -n +20)
+          VSCODE_TO_DELETE=$(echo "$VSCODE_RELEASES" | tail -n +11)
+
+          # 获取Zed releases (保留最新10个)
+          ZED_RELEASES=$(echo "$RELEASES" | jq -r '.[] | select(.tag_name | startswith("zed-")) | .id' | head -n +20)
+          ZED_TO_DELETE=$(echo "$ZED_RELEASES" | tail -n +11)
+
+          # 删除旧的VSCode releases
+          for release_id in $VSCODE_TO_DELETE; do
+            if [ ! -z "$release_id" ]; then
+              echo "Deleting VSCode release ID: $release_id"
+              curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/$release_id"
+            fi
+          done
+
+          # 删除旧的Zed releases
+          for release_id in $ZED_TO_DELETE; do
+            if [ ! -z "$release_id" ]; then
+              echo "Deleting Zed release ID: $release_id"
+              curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/$release_id"
+            fi
+          done
